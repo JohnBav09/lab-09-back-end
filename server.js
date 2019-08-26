@@ -33,13 +33,18 @@ function Day (summary, time) {
   this.time = new Date(time *1000).toDateString();
 }
 
-// Events
+// events
 function Event (link, name, event_date, summary){
   this.link = link;
   this.name = name;
   this.event_date = new Date(event_date).toDateString();
   this.summary = summary;
 }
+
+// yelp
+
+
+// movies
 
 // =========== TARGET LOCATION from API ===========
 
@@ -109,9 +114,18 @@ function getWeather(request, response){
   // console.log(localData);
   
   client.query(`SELECT * FROM weather WHERE search_query=$1`, [localData.search_query]).then(sqlResult => {
-
-    //found stuff in database
+    
+    let notOld = true;
     if(sqlResult.rowCount > 0){
+      const age =sqlResult.rows[0].created_at;  
+      // 150000000000
+      const ageInSeconds = (date.now()- age) /
+      1000; // 15
+      if(ageInSeconds > 15){
+        notOld = false
+        client.query('DELETE FROM weathers WHERE search_query=$1', localData.search_query); 
+      }
+      console.log('age in seconds', ageInSeconds)
       console.log('found weather stuff in database')
 
       response.send(sqlResult.rows[0]);
@@ -164,7 +178,18 @@ function getEvents(request, response){
 
   // Database squery - check the database for data
   client.query(`SELECT * FROM events WHERE search_query=$1`, [eventData.search_query]).then(sqlResult => {
-
+    
+    let notOld = true;
+    if(sqlResult.rowCount > 0){
+      const age =sqlResult.rows[0].created_at;  
+      // 150000000000
+      const ageInSeconds = (date.now()- age) /
+      1000; // 15
+      if(ageInSeconds > 86400 ){
+        notOld = false
+        client.query('DELETE FROM events WHERE search_query=$1', localData.search_query); 
+      }
+      console.log('age in seconds', ageInSeconds)
     if(sqlResult.rowCount === 0){
       console.log('data from internet');
 
@@ -198,16 +223,139 @@ function getEvents(request, response){
       'use the data that exists in the db';
       response.send(sqlResult.rows);
     }
-  });
+  };
 }
+
+
+// ============ YELP from API ==============
+
+app.get('/Yelp', getYelp)
+
+function getYelp(request, response){
+
+  let eventData = request.query.data;
+
+  // Database squery - check the database for data
+  client.query(`SELECT * FROM Yelp WHERE search_query=$1`, [eventData.search_query]).then(sqlResult => {
+    
+    let notOld = true;
+    if(sqlResult.rowCount > 0){
+      const age =sqlResult.rows[0].created_at;  
+      // 150000000000
+      const ageInSeconds = (date.now()- age) /
+      1000; // 15
+      if(ageInSeconds > 43200 ){
+        notOld = false
+        client.query('DELETE FROM Yelp WHERE search_query=$1', localData.search_query); 
+      }
+      console.log('age in seconds', ageInSeconds)
+    if(sqlResult.rowCount === 0){
+      console.log('data from internet');
+
+      const urlfromEventbrite = `https://www.eventbriteapi.com/v3/Yelp/search/?sort_by=date&location.latitude=${eventData.latitude}&location.longitude=${eventData.longitude}&token=${process.env.EVENTBRITE_API_KEY}`;
+
+      superagent.get(urlfromEventbrite).then(responseFromSuper => {
+        // console.log(responseFromSuper.body)
+    
+        const eventbriteData = responseFromSuper.body.Yelp;
+        const formattedYelp = eventbriteData.map(event => new Event(event.url, event.name.text, event.start.local, event.description.text));
+  
+        response.send(formattedYelp);
+
+        // Data structure to insert into database with where it goes
+        formattedYelp.forEach(Yelp => {
+          const insertYelp = `
+          INSERT INTO Yelp
+          (name, image_url, price, rating, url , created_at , location_ id )
+          VALUE
+          ($1, $2, $3, $4, $5 ,$6 ,$7);`
+          client.query(insertYelp, [Yelp.name, YelpData.image_url, Yelp.price, Yelp.rating, Yelp.url, Yelp.created_at, yelp.location_id]);
+        });
+
+        const url = `https://api.yelp.com/v3/businesses/search?location=${request.query.data.search_query}`;
+
+        superagent.get(url)
+          .set('Authorization', `Bearer ${process.env.YELP_API_KEY}`)
+          .then(result => {
+            const yelpSummaries = result.body.businesses.map(business => {
+              const review = new Yelp(business);
+              review.save(request.query.data.id);
+              return review;
+            });
+  
+            response.send(yelpSummaries);
+          })
+          .catch(error => handleError(error, response));
+      }
+    })
+  }
+
+
+// ============ Movies from API ==============
+
+app.get('/Movies', getMovies)
+
+function getMovies(request, response){
+
+  let MoviesData = request.query.data;
+
+  // Database squery - check the database for data
+  client.query(`SELECT * FROM Movies WHERE search_query=$1`, [MoviesData.search_query]).then(sqlResult => {
+    
+    let notOld = true;
+    if(sqlResult.rowCount > 0){
+      const age =sqlResult.rows[0].created_at;  
+      // 150000000000
+      const ageInSeconds = (date.now()- age) /
+      1000; // 15
+      if(ageInSeconds > 1210000 ){
+        notOld = false
+        client.query('DELETE FROM Movies WHERE search_query=$1', localData.search_query); 
+      }
+      console.log('age in seconds', ageInSeconds)
+    if(sqlResult.rowCount === 0){
+      console.log('data from internet');
+
+      const urlfromMovie = `=https:api.themoviedb.org/3/search/movie/?api_key=${process.env.MOVIE_API_KEY}&language=en-US&page=1&query=${request.query.data.search_query}`;
+
+      superagent.get(urlfromMovie).then(responseFromSuper => {
+        // console.log(responseFromSuper.body)
+    
+        const MovieData = responseFromSuper.body.Movies;
+        const formattedMovies = MovieData.map(event => new Event(event.url, event.name.text, event.start.local, event.description.text));
+  
+        response.send(formattedMovies);
+
+        // Data structure to insert into database with where it goes
+        formattedMovies.forEach(event => {
+          const insertMovies = `
+          INSERT INTO Movies
+          (title, overview, average_votes, total_votes, image_url, popularity, released_on, created_at, location_id)
+          VALUE
+          ($1, $2, $3, $4, $5);`
+          client.query(insertMovies, [movies.title, movies.overview, movies.average_votes, movies.total_votes, movies.img_url, movies.popularity, movies.released_on, movies.created_at, movies.location_id});
+
+      }).catch(error => {
+        response.status(500).send(error.message);
+        console.error(error);
+      })
+
+    } else {
+      console.log('data already exists in event database');
+      'use the data that exists in the db';
+      response.send(sqlResult.rows);
+    }
+  };
+}
+
 
 // ====================================
 
-app.listen(PORT, () => {
-  console.log(`app is running on ${PORT}`);
-});
+// app.listen(PORT, () => {
+//   console.log(`app is running on ${PORT}`);
 
 
+// })
 // class notes
 
 // API is a server that lives on the internet. Places where code lives.
